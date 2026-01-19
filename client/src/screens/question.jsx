@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Header from "../components/header";
 import Footer from "../components/footer";
@@ -40,6 +40,10 @@ const QNA = () => {
   const [browserSupported, setBrowserSupported] = useState(true);
   const toast = useToast();
 
+  // Prevent multiple fetches
+  const isFetchingRef = useRef(false);
+  const hasFetchedRef = useRef(false);
+
   // Initialize speech recognition
   useEffect(() => {
     if ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) {
@@ -78,6 +82,12 @@ const QNA = () => {
 
   // Fetch speech challenge
   const fetchChallenge = useCallback(async () => {
+    // Prevent duplicate requests
+    if (isFetchingRef.current) {
+      return;
+    }
+
+    isFetchingRef.current = true;
     setLoading(true);
     setResult(null);
     setUserAnswer("");
@@ -103,15 +113,23 @@ const QNA = () => {
       }
     } catch (error) {
       console.error("Error fetching challenge:", error);
-      // Use fallback phrase
-      setQuestion("Hello World");
+      // Don't show error for cancelled requests
+      if (error.message !== "Duplicate request cancelled") {
+        // Use fallback phrase
+        setQuestion("Hello World");
+      }
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   }, []);
 
+  // Initial fetch - only once
   useEffect(() => {
-    fetchChallenge();
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchChallenge();
+    }
   }, [fetchChallenge]);
 
   const handleSubmit = async (e) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Header from "../components/header";
 import Footer from "../components/footer";
@@ -28,8 +28,19 @@ const QuizQuestion = () => {
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
   const toast = useToast();
 
+  // Prevent multiple simultaneous fetches
+  const isFetchingRef = useRef(false);
+  const hasFetchedRef = useRef(false);
+
   const fetchQuestion = useCallback(async () => {
+    // Prevent duplicate requests
+    if (isFetchingRef.current) {
+      return;
+    }
+
+    isFetchingRef.current = true;
     setLoading(true);
+
     try {
       const response = await quizAPI.getRandomQuestion();
       const data = response.data;
@@ -41,14 +52,22 @@ const QuizQuestion = () => {
         toast.error("Failed to load question");
       }
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      // Don't show error for cancelled requests
+      if (error.message !== "Duplicate request cancelled") {
+        toast.error(getErrorMessage(error));
+      }
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [toast]);
+  }, []); // Remove toast from dependencies
 
+  // Initial fetch - only once
   useEffect(() => {
-    fetchQuestion();
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchQuestion();
+    }
   }, [fetchQuestion]);
 
   const handleAnswerSelect = (answerId) => {
@@ -140,7 +159,13 @@ const QuizQuestion = () => {
                 </div>
                 <Button
                   variant="ghost"
-                  onClick={fetchQuestion}
+                  onClick={() => {
+                    if (!loading && !submitting) {
+                      setSelectedAnswer(null);
+                      setShowResult(false);
+                      fetchQuestion();
+                    }
+                  }}
                   disabled={loading || submitting}
                   className="gap-2"
                 >
@@ -203,7 +228,8 @@ const QuizQuestion = () => {
                         key={answer.id}
                         option={answer}
                         index={index}
-                        state={getAnswerState(answer)}
+                        isSelected={selectedAnswer === answer.id}
+                        showResult={showResult}
                         onSelect={handleAnswerSelect}
                         disabled={showResult || submitting}
                       />

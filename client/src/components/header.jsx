@@ -18,23 +18,24 @@ import {
 } from "lucide-react";
 
 const Header = ({ title }) => {
-  const { verifyUser, logout, isAuthenticated } = useAuth();
+  const { logout, isAuthenticated, initialized } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
 
-  document.title = title || "KIDOAI Tutor";
-
+  // Set document title
   useEffect(() => {
-    verifyUser();
-  }, [verifyUser]);
+    document.title = title || "KIDOAI Tutor";
+  }, [title]);
 
+  // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  // Handle scroll effect
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 10);
@@ -43,8 +44,8 @@ const Header = ({ title }) => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     toast.success("Logged out successfully");
     navigate("/");
   };

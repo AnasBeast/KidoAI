@@ -1,121 +1,520 @@
-import React from "react"
-import { useState, useEffect } from "react"
-import { motion } from "framer-motion"
-import Header from "../components/header"
-import Footer from "../components/footer"
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import Header from "../components/header";
+import Footer from "../components/footer";
+import { useToast } from "../components/Toast";
+import { quizAPI, getErrorMessage } from "../services/api";
+import LoadingSpinner from "../components/LoadingSpinner";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import {
+  Mic,
+  MicOff,
+  Volume2,
+  RotateCcw,
+  Send,
+  Flame,
+  CheckCircle,
+  Lightbulb,
+  Headphones,
+  MessageSquare,
+  VolumeX,
+} from "lucide-react";
 
 const QNA = () => {
-  const [question, setQuestion] = useState("Hello World")
-  const [userAnswer, setUserAnswer] = useState("")
-  const [result, setResult] = useState(null)
-  const [isListening, setIsListening] = useState(false)
-  const [recognition, setRecognition] = useState(null)
+  const [question, setQuestion] = useState("");
+  const [userAnswer, setUserAnswer] = useState("");
+  const [result, setResult] = useState(null);
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [browserSupported, setBrowserSupported] = useState(true);
+  const toast = useToast();
 
+  // Initialize speech recognition
   useEffect(() => {
     if ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      const recognitionInstance = new SpeechRecognition()
-      recognitionInstance.continuous = false
-      recognitionInstance.lang = "en-US"
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognitionInstance = new SpeechRecognition();
+      recognitionInstance.continuous = false;
+      recognitionInstance.lang = "en-US";
+      recognitionInstance.interimResults = true;
+
       recognitionInstance.onresult = (event) => {
-        const transcript = event.results[0][0].transcript
-        setUserAnswer(transcript)
-      }
-      recognitionInstance.onend = () => setIsListening(false)
-      setRecognition(recognitionInstance)
-    }
-  }, [])
-  
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    if (userAnswer.toLowerCase().trim() === question.toLowerCase().trim()) {
-      setResult("Correct!")
+        const transcript = event.results[0][0].transcript;
+        setUserAnswer(transcript);
+      };
+
+      recognitionInstance.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        setIsListening(false);
+        if (event.error === "not-allowed") {
+          toast.error(
+            "Please allow microphone access to use speech recognition",
+          );
+        } else {
+          toast.error("Speech recognition error. Please try again.");
+        }
+      };
+
+      recognitionInstance.onend = () => setIsListening(false);
+      setRecognition(recognitionInstance);
     } else {
-      setResult("Incorrect. Try again!")
+      setBrowserSupported(false);
+      toast.warning("Speech recognition is not supported in your browser");
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch speech challenge
+  const fetchChallenge = useCallback(async () => {
+    setLoading(true);
+    setResult(null);
+    setUserAnswer("");
+
+    try {
+      const response = await quizAPI.getSpeechChallenge();
+      const data = response.data;
+
+      if (data?.text) {
+        setQuestion(data.text);
+      } else {
+        // Fallback phrases if API doesn't return one
+        const fallbackPhrases = [
+          "Hello World",
+          "The quick brown fox jumps over the lazy dog",
+          "Learning is fun with KIDOAI",
+          "Practice makes perfect",
+          "I love to learn new things",
+        ];
+        setQuestion(
+          fallbackPhrases[Math.floor(Math.random() * fallbackPhrases.length)],
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching challenge:", error);
+      // Use fallback phrase
+      setQuestion("Hello World");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchChallenge();
+  }, [fetchChallenge]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!userAnswer.trim()) {
+      toast.warning("Please speak or type your answer first");
+      return;
+    }
+
+    setSubmitting(true);
+
+    // Calculate similarity for partial matches
+    const similarity = calculateSimilarity(
+      userAnswer.toLowerCase().trim(),
+      question.toLowerCase().trim(),
+    );
+
+    try {
+      await quizAPI.submitAnswer({
+        isValid: similarity >= 0.8,
+        answer: userAnswer,
+      });
+
+      if (similarity >= 0.95) {
+        setResult({ status: "perfect", message: "Perfect! 🎉" });
+        setStreak((prev) => prev + 1);
+        toast.success("Perfect pronunciation! 🎉");
+      } else if (similarity >= 0.8) {
+        setResult({ status: "correct", message: "Great job! Almost perfect!" });
+        setStreak((prev) => prev + 1);
+        toast.success("Great job! 👏");
+      } else if (similarity >= 0.5) {
+        setResult({ status: "partial", message: "Good try! Keep practicing!" });
+        setStreak(0);
+        toast.info("Good attempt! Try again for a better score.");
+      } else {
+        setResult({ status: "incorrect", message: "Not quite. Try again!" });
+        setStreak(0);
+        toast.info("Keep practicing! You'll get it! 💪");
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const calculateSimilarity = (str1, str2) => {
+    const words1 = str1.split(" ").filter(Boolean);
+    const words2 = str2.split(" ").filter(Boolean);
+    let matches = 0;
+
+    words1.forEach((word, index) => {
+      if (words2[index] && word === words2[index]) {
+        matches++;
+      }
+    });
+
+    return matches / Math.max(words1.length, words2.length);
+  };
 
   const startListening = () => {
     if (recognition) {
-      recognition.start()
-      setIsListening(true)
+      setUserAnswer("");
+      recognition.start();
+      setIsListening(true);
     }
-  }
+  };
+
+  const stopListening = () => {
+    if (recognition) {
+      recognition.stop();
+      setIsListening(false);
+    }
+  };
+
+  const speakQuestion = () => {
+    if ("speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(question);
+      utterance.rate = 0.8;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    } else {
+      toast.warning("Text-to-speech is not supported in your browser");
+    }
+  };
+
+  const getResultStyles = () => {
+    if (!result) return { bg: "", border: "", text: "", icon: null };
+    switch (result.status) {
+      case "perfect":
+        return {
+          bg: "bg-success-50",
+          border: "border-success-500",
+          text: "text-success-700",
+          icon: <CheckCircle className="w-6 h-6 text-success-600" />,
+        };
+      case "correct":
+        return {
+          bg: "bg-secondary-50",
+          border: "border-secondary-500",
+          text: "text-secondary-700",
+          icon: <CheckCircle className="w-6 h-6 text-secondary-600" />,
+        };
+      case "partial":
+        return {
+          bg: "bg-warning-50",
+          border: "border-warning-500",
+          text: "text-warning-700",
+          icon: <Lightbulb className="w-6 h-6 text-warning-600" />,
+        };
+      case "incorrect":
+        return {
+          bg: "bg-error-50",
+          border: "border-error-500",
+          text: "text-error-700",
+          icon: <MessageSquare className="w-6 h-6 text-error-600" />,
+        };
+      default:
+        return { bg: "", border: "", text: "", icon: null };
+    }
+  };
+
+  const resultStyles = getResultStyles();
 
   return (
-    <div className="bg-blue-100 min-h-screen">
-        <Header/>
-        <div className="bg-blue-100 pt-40">
-        <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-xl">
-            Repeat The sentence below:
-      <motion.h2
-        className="text-2xl font-bold mb-4 text-gray-800"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        {question}
-      </motion.h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-        >
-          <input
-            type="text"
-            disabled={true}
-            value={userAnswer}
-            onChange={(e) => setUserAnswer(e.target.value)}
-            placeholder="Type your answer here"
-            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </motion.div>
-        <motion.div
-          className="flex space-x-4"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-        >
-          <motion.button
-            type="submit"
-            className="flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-150"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            Submit Answer
-          </motion.button>
-          <motion.button
-            type="button"
-            onClick={startListening}
-            className={`flex-1 py-2 px-4 rounded-md text-white transition duration-150 ${
-              isListening ? "bg-red-500 hover:bg-red-600" : "bg-green-500 hover:bg-green-600"
-            }`}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            {isListening ? "Listening..." : "Speak Answer"}
-          </motion.button>
-        </motion.div>
-      </form>
-      {result && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className={`mt-6 p-4 rounded-md ${
-            result === "Correct!" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-          }`}
-        >
-          {result}
-        </motion.div>
-      )}
-    </div>
+    <div className="min-h-screen bg-gradient-to-br from-success-50 via-white to-primary-50">
+      <Header />
+      <div className="container mx-auto px-4 py-8">
+        {/* Stats Bar */}
+        <div className="max-w-2xl mx-auto mb-6">
+          <Card variant="glass" className="border-0 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-success-100 flex items-center justify-center">
+                    <Mic className="w-5 h-5 text-success-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-500">Challenge</p>
+                    <p className="font-bold text-neutral-800">
+                      Speech Practice
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-warning-100 flex items-center justify-center">
+                    <Flame className="w-5 h-5 text-warning-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-500">Streak</p>
+                    <p className="font-bold text-warning-600">{streak}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  onClick={fetchChallenge}
+                  disabled={loading}
+                  className="gap-2"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  New
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-        <Footer/>
+
+        {/* Main Card */}
+        <div className="max-w-2xl mx-auto">
+          <AnimatePresence mode="wait">
+            {loading ? (
+              <motion.div
+                key="loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Card variant="elevated" className="border-0">
+                  <CardContent className="p-8">
+                    <LoadingSpinner text="Loading challenge..." />
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="content"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                <Card
+                  variant="elevated"
+                  className="overflow-hidden border-0 shadow-xl"
+                >
+                  {/* Challenge Header */}
+                  <div className="bg-gradient-to-r from-success-500 via-success-600 to-secondary-500 p-6 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-30" />
+                    <div className="relative">
+                      <Badge
+                        variant="default"
+                        className="bg-white/20 text-white border-0 mb-3"
+                      >
+                        <Mic className="w-3 h-3 mr-1" />
+                        Repeat the sentence below
+                      </Badge>
+                      <div className="flex items-center gap-4">
+                        <motion.h2
+                          className="text-xl md:text-2xl font-bold text-white flex-1"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                        >
+                          "{question}"
+                        </motion.h2>
+                        <motion.button
+                          onClick={speakQuestion}
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          className="p-3 bg-white/20 rounded-xl text-white hover:bg-white/30 transition"
+                          title="Listen to pronunciation"
+                        >
+                          <Volume2 className="w-6 h-6" />
+                        </motion.button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Answer Section */}
+                  <form onSubmit={handleSubmit}>
+                    <CardContent className="p-6 space-y-6">
+                      {/* Your Answer Display */}
+                      <div>
+                        <label className="block text-sm font-medium text-neutral-700 mb-2">
+                          Your Answer:
+                        </label>
+                        <div className="relative">
+                          <Input
+                            type="text"
+                            value={userAnswer}
+                            onChange={(e) => setUserAnswer(e.target.value)}
+                            placeholder={
+                              isListening
+                                ? "Listening..."
+                                : "Click 'Start Recording' or type your answer"
+                            }
+                            className={`pr-12 ${
+                              isListening
+                                ? "border-error-400 bg-error-50 ring-2 ring-error-200"
+                                : ""
+                            }`}
+                          />
+                          {isListening && (
+                            <motion.div
+                              animate={{ scale: [1, 1.2, 1] }}
+                              transition={{ repeat: Infinity, duration: 1 }}
+                              className="absolute right-4 top-1/2 -translate-y-1/2"
+                            >
+                              <div className="w-4 h-4 bg-error-500 rounded-full" />
+                            </motion.div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {browserSupported && (
+                          <Button
+                            type="button"
+                            onClick={
+                              isListening ? stopListening : startListening
+                            }
+                            disabled={submitting}
+                            variant={isListening ? "destructive" : "success"}
+                            className="flex-1 gap-2"
+                          >
+                            {isListening ? (
+                              <>
+                                <MicOff className="w-5 h-5" />
+                                Stop Recording
+                              </>
+                            ) : (
+                              <>
+                                <Mic className="w-5 h-5" />
+                                Start Recording
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        <Button
+                          type="submit"
+                          disabled={
+                            !userAnswer.trim() || submitting || isListening
+                          }
+                          className="flex-1 gap-2 shadow-lg"
+                        >
+                          {submitting ? (
+                            <>
+                              <LoadingSpinner
+                                size="sm"
+                                showText={false}
+                                color="white"
+                              />
+                              Checking...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-5 h-5" />
+                              Submit Answer
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </form>
+
+                  {/* Result Feedback */}
+                  <AnimatePresence>
+                    {result && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className={`p-6 border-t-4 ${resultStyles.bg} ${resultStyles.border}`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-12 h-12 rounded-full flex items-center justify-center ${resultStyles.bg}`}
+                          >
+                            {resultStyles.icon}
+                          </div>
+                          <div>
+                            <p
+                              className={`font-bold text-lg ${resultStyles.text}`}
+                            >
+                              {result.message}
+                            </p>
+                            <p
+                              className={`text-sm opacity-75 ${resultStyles.text}`}
+                            >
+                              {result.status === "incorrect" ||
+                              result.status === "partial"
+                                ? `Expected: "${question}"`
+                                : streak > 1
+                                  ? `${streak} in a row! Keep it up!`
+                                  : "Great pronunciation!"}
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </Card>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Tips Card */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="mt-6"
+          >
+            <Card variant="glass" className="border-0">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5 text-warning-500" />
+                  Tips for Success
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ul className="text-sm text-neutral-600 space-y-2">
+                  <li className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-secondary-100 flex items-center justify-center flex-shrink-0">
+                      <Headphones className="w-3 h-3 text-secondary-600" />
+                    </div>
+                    <span>
+                      Click the speaker icon to hear the correct pronunciation
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-success-100 flex items-center justify-center flex-shrink-0">
+                      <MessageSquare className="w-3 h-3 text-success-600" />
+                    </div>
+                    <span>Speak clearly and at a moderate pace</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+                      <VolumeX className="w-3 h-3 text-primary-600" />
+                    </div>
+                    <span>Find a quiet place for better recognition</span>
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      </div>
+      <Footer />
     </div>
-  )
-}
+  );
+};
 
-export default QNA
-
+export default QNA;

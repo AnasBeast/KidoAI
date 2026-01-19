@@ -17,10 +17,15 @@ import {
   Brain,
 } from "lucide-react";
 
+// Session storage key for tracking answered questions
+const ANSWERED_QUESTIONS_KEY = "quiz_answered_questions";
+const MAX_STORED_QUESTIONS = 50; // Keep track of last 50 questions
+
 const QuizQuestion = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [question, setQuestion] = useState("");
+  const [questionId, setQuestionId] = useState(null);
   const [answers, setAnswers] = useState([]);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showResult, setShowResult] = useState(false);
@@ -28,12 +33,48 @@ const QuizQuestion = () => {
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
   const toast = useToast();
 
-  // Prevent multiple simultaneous fetches
+  // Refs to prevent multiple fetches
   const isFetchingRef = useRef(false);
   const hasFetchedRef = useRef(false);
+  const answeredQuestionsRef = useRef([]);
+
+  // Load answered questions from session storage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(ANSWERED_QUESTIONS_KEY);
+      if (stored) {
+        answeredQuestionsRef.current = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error("Error loading answered questions:", e);
+    }
+  }, []);
+
+  // Save answered question to session storage
+  const saveAnsweredQuestion = useCallback((qId, qText) => {
+    const identifier = qId || qText;
+    if (!identifier) return;
+
+    const answered = answeredQuestionsRef.current;
+    if (!answered.includes(identifier)) {
+      answered.push(identifier);
+      // Keep only the last MAX_STORED_QUESTIONS
+      if (answered.length > MAX_STORED_QUESTIONS) {
+        answered.shift();
+      }
+      answeredQuestionsRef.current = answered;
+      try {
+        sessionStorage.setItem(
+          ANSWERED_QUESTIONS_KEY,
+          JSON.stringify(answered),
+        );
+      } catch (e) {
+        console.error("Error saving answered questions:", e);
+      }
+    }
+  }, []);
 
   const fetchQuestion = useCallback(async () => {
-    // Prevent duplicate requests
     if (isFetchingRef.current) {
       return;
     }
@@ -42,17 +83,31 @@ const QuizQuestion = () => {
     setLoading(true);
 
     try {
-      const response = await quizAPI.getRandomQuestion();
+      // Pass previously answered questions to exclude them
+      const excludeIds = answeredQuestionsRef.current;
+      const response = await quizAPI.getRandomQuestion(excludeIds);
       const data = response.data;
 
       if (data.error !== "true" && data.text) {
+        // Check if we got the same question (shouldn't happen but just in case)
+        const newQuestionId = data.id || data.text;
+        if (answeredQuestionsRef.current.includes(newQuestionId)) {
+          // If we still got a duplicate, clear some history and retry
+          answeredQuestionsRef.current =
+            answeredQuestionsRef.current.slice(-10);
+          sessionStorage.setItem(
+            ANSWERED_QUESTIONS_KEY,
+            JSON.stringify(answeredQuestionsRef.current),
+          );
+        }
+
         setQuestion(data.text);
+        setQuestionId(data.id || data.text);
         setAnswers(data.options || []);
       } else {
         toast.error("Failed to load question");
       }
     } catch (error) {
-      // Don't show error for cancelled requests
       if (error.message !== "Duplicate request cancelled") {
         toast.error(getErrorMessage(error));
       }
@@ -60,7 +115,7 @@ const QuizQuestion = () => {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, []); // Remove toast from dependencies
+  }, [toast]);
 
   // Initial fetch - only once
   useEffect(() => {
@@ -90,7 +145,11 @@ const QuizQuestion = () => {
       await quizAPI.submitAnswer({
         isValid: isCorrect,
         answer: answers.find((answer) => answer.id === selectedAnswer)?.text,
+        questionId: questionId,
       });
+
+      // Save this question as answered
+      saveAnsweredQuestion(questionId, question);
 
       setQuestionsAnswered((prev) => prev + 1);
 
@@ -115,6 +174,16 @@ const QuizQuestion = () => {
       setShowResult(false);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSkip = () => {
+    if (!loading && !submitting) {
+      // Save skipped question too to avoid seeing it again
+      saveAnsweredQuestion(questionId, question);
+      setSelectedAnswer(null);
+      setShowResult(false);
+      fetchQuestion();
     }
   };
 
@@ -159,13 +228,7 @@ const QuizQuestion = () => {
                 </div>
                 <Button
                   variant="ghost"
-                  onClick={() => {
-                    if (!loading && !submitting) {
-                      setSelectedAnswer(null);
-                      setShowResult(false);
-                      fetchQuestion();
-                    }
-                  }}
+                  onClick={handleSkip}
                   disabled={loading || submitting}
                   className="gap-2"
                 >
@@ -195,7 +258,7 @@ const QuizQuestion = () => {
               </motion.div>
             ) : (
               <motion.div
-                key="quiz"
+                key={questionId || "quiz"}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -228,8 +291,7 @@ const QuizQuestion = () => {
                         key={answer.id}
                         option={answer}
                         index={index}
-                        isSelected={selectedAnswer === answer.id}
-                        showResult={showResult}
+                        state={getAnswerState(answer)}
                         onSelect={handleAnswerSelect}
                         disabled={showResult || submitting}
                       />
@@ -288,12 +350,20 @@ const QuizQuestion = () => {
                           </div>
                           <div>
                             <p
-                              className={`font-bold text-lg ${isCorrect ? "text-success-700" : "text-error-700"}`}
+                              className={`font-bold text-lg ${
+                                isCorrect
+                                  ? "text-success-700"
+                                  : "text-error-700"
+                              }`}
                             >
                               {isCorrect ? "Excellent!" : "Not quite!"}
                             </p>
                             <p
-                              className={`text-sm ${isCorrect ? "text-success-600" : "text-error-600"}`}
+                              className={`text-sm ${
+                                isCorrect
+                                  ? "text-success-600"
+                                  : "text-error-600"
+                              }`}
                             >
                               {isCorrect
                                 ? streak > 1

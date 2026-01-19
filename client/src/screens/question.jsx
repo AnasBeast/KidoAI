@@ -28,6 +28,10 @@ import {
   VolumeX,
 } from "lucide-react";
 
+// Session storage key for tracking used phrases
+const USED_PHRASES_KEY = "speech_used_phrases";
+const MAX_STORED_PHRASES = 30;
+
 const QNA = () => {
   const [question, setQuestion] = useState("");
   const [userAnswer, setUserAnswer] = useState("");
@@ -40,9 +44,43 @@ const QNA = () => {
   const [browserSupported, setBrowserSupported] = useState(true);
   const toast = useToast();
 
-  // Prevent multiple fetches
+  // Refs to prevent multiple fetches
   const isFetchingRef = useRef(false);
   const hasFetchedRef = useRef(false);
+  const usedPhrasesRef = useRef([]);
+
+  // Load used phrases from session storage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(USED_PHRASES_KEY);
+      if (stored) {
+        usedPhrasesRef.current = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error("Error loading used phrases:", e);
+    }
+  }, []);
+
+  // Save used phrase to session storage
+  const saveUsedPhrase = useCallback((phrase) => {
+    if (!phrase) return;
+
+    const normalizedPhrase = phrase.toLowerCase().trim();
+    const used = usedPhrasesRef.current;
+
+    if (!used.includes(normalizedPhrase)) {
+      used.push(normalizedPhrase);
+      if (used.length > MAX_STORED_PHRASES) {
+        used.shift();
+      }
+      usedPhrasesRef.current = used;
+      try {
+        sessionStorage.setItem(USED_PHRASES_KEY, JSON.stringify(used));
+      } catch (e) {
+        console.error("Error saving used phrases:", e);
+      }
+    }
+  }, []);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -93,23 +131,53 @@ const QNA = () => {
     setUserAnswer("");
 
     try {
-      const response = await quizAPI.getSpeechChallenge();
+      // Pass previously used phrases to exclude them
+      const excludePhrases = usedPhrasesRef.current;
+      const response = await quizAPI.getSpeechChallenge(excludePhrases);
       const data = response.data;
 
       if (data?.text) {
+        // Check if we got a duplicate
+        const normalizedText = data.text.toLowerCase().trim();
+        if (usedPhrasesRef.current.includes(normalizedText)) {
+          // Clear some history
+          usedPhrasesRef.current = usedPhrasesRef.current.slice(-5);
+          sessionStorage.setItem(
+            USED_PHRASES_KEY,
+            JSON.stringify(usedPhrasesRef.current),
+          );
+        }
         setQuestion(data.text);
       } else {
         // Fallback phrases if API doesn't return one
         const fallbackPhrases = [
-          "Hello World",
+          "Hello, how are you today?",
           "The quick brown fox jumps over the lazy dog",
           "Learning is fun with KIDOAI",
           "Practice makes perfect",
           "I love to learn new things",
+          "Knowledge is power",
+          "Every day is a new opportunity",
+          "Reading opens new worlds",
+          "Curiosity leads to discovery",
+          "Education is the key to success",
         ];
-        setQuestion(
-          fallbackPhrases[Math.floor(Math.random() * fallbackPhrases.length)],
+
+        // Filter out already used phrases
+        const availablePhrases = fallbackPhrases.filter(
+          (p) => !usedPhrasesRef.current.includes(p.toLowerCase().trim()),
         );
+
+        const selectedPhrase =
+          availablePhrases.length > 0
+            ? availablePhrases[
+                Math.floor(Math.random() * availablePhrases.length)
+              ]
+            : fallbackPhrases[
+                Math.floor(Math.random() * fallbackPhrases.length)
+              ];
+
+        setQuestion(selectedPhrase);
       }
     } catch (error) {
       console.error("Error fetching challenge:", error);
@@ -152,7 +220,11 @@ const QNA = () => {
       await quizAPI.submitAnswer({
         isValid: similarity >= 0.8,
         answer: userAnswer,
+        challenge: question,
       });
+
+      // Save this phrase as used
+      saveUsedPhrase(question);
 
       if (similarity >= 0.95) {
         setResult({ status: "perfect", message: "Perfect! 🎉" });
@@ -175,6 +247,14 @@ const QNA = () => {
       toast.error(getErrorMessage(error));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleNewChallenge = () => {
+    if (!loading && !submitting) {
+      // Save current phrase as used even if skipped
+      saveUsedPhrase(question);
+      fetchChallenge();
     }
   };
 

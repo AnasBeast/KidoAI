@@ -1,4 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+} from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Header from "../components/header";
 import Footer from "../components/footer";
@@ -23,61 +29,208 @@ import {
   Lightbulb,
 } from "lucide-react";
 
-// Sample sentences for the game
-const SENTENCES = [
+// Session storage key for tracking used sentences
+const USED_SENTENCES_KEY = "kidoai_used_fillgap_sentences";
+
+// Extended sentence pool with categories for variety
+const ALL_SENTENCES = [
+  // Animals
   {
     id: 1,
     text: "The quick _____ fox jumps over the _____ dog.",
     correctWords: ["brown", "lazy"],
     allWords: ["brown", "lazy", "smart", "active"],
+    category: "animals",
   },
   {
     id: 2,
-    text: "The _____ shines brightly in the _____ sky.",
-    correctWords: ["sun", "blue"],
-    allWords: ["sun", "blue", "moon", "dark"],
-  },
-  {
-    id: 3,
-    text: "Learning is _____ when you have a _____ attitude.",
-    correctWords: ["fun", "positive"],
-    allWords: ["fun", "positive", "boring", "negative"],
-  },
-  {
-    id: 4,
     text: "The _____ cat sleeps on the _____ mat.",
     correctWords: ["fluffy", "warm"],
     allWords: ["fluffy", "warm", "angry", "cold"],
+    category: "animals",
   },
   {
+    id: 3,
+    text: "The _____ bird sings a _____ song.",
+    correctWords: ["small", "beautiful"],
+    allWords: ["small", "beautiful", "large", "quiet"],
+    category: "animals",
+  },
+  {
+    id: 4,
+    text: "A _____ elephant has _____ ears.",
+    correctWords: ["big", "large"],
+    allWords: ["big", "large", "tiny", "small"],
+    category: "animals",
+  },
+  // Nature
+  {
     id: 5,
+    text: "The _____ shines brightly in the _____ sky.",
+    correctWords: ["sun", "blue"],
+    allWords: ["sun", "blue", "moon", "dark"],
+    category: "nature",
+  },
+  {
+    id: 6,
+    text: "The _____ flowers bloom in the _____ garden.",
+    correctWords: ["colorful", "spring"],
+    allWords: ["colorful", "spring", "dead", "winter"],
+    category: "nature",
+  },
+  {
+    id: 7,
+    text: "Rain falls from _____ clouds in the _____ weather.",
+    correctWords: ["dark", "stormy"],
+    allWords: ["dark", "stormy", "white", "sunny"],
+    category: "nature",
+  },
+  // Learning
+  {
+    id: 8,
+    text: "Learning is _____ when you have a _____ attitude.",
+    correctWords: ["fun", "positive"],
+    allWords: ["fun", "positive", "boring", "negative"],
+    category: "learning",
+  },
+  {
+    id: 9,
     text: "Reading _____ helps improve your _____ skills.",
     correctWords: ["books", "vocabulary"],
     allWords: ["books", "vocabulary", "games", "cooking"],
+    category: "learning",
+  },
+  {
+    id: 10,
+    text: "A _____ student always does their _____ work.",
+    correctWords: ["good", "homework"],
+    allWords: ["good", "homework", "bad", "chores"],
+    category: "learning",
+  },
+  {
+    id: 11,
+    text: "Practice makes _____ when you work _____.",
+    correctWords: ["perfect", "hard"],
+    allWords: ["perfect", "hard", "worse", "lazy"],
+    category: "learning",
+  },
+  // Food
+  {
+    id: 12,
+    text: "The _____ apple tastes very _____.",
+    correctWords: ["red", "sweet"],
+    allWords: ["red", "sweet", "green", "sour"],
+    category: "food",
+  },
+  {
+    id: 13,
+    text: "I drink _____ milk for _____ bones.",
+    correctWords: ["cold", "strong"],
+    allWords: ["cold", "strong", "hot", "weak"],
+    category: "food",
+  },
+  {
+    id: 14,
+    text: "Fresh _____ are healthy for your _____.",
+    correctWords: ["vegetables", "body"],
+    allWords: ["vegetables", "body", "candies", "toys"],
+    category: "food",
+  },
+  // Daily life
+  {
+    id: 15,
+    text: "I wake up _____ in the _____ morning.",
+    correctWords: ["early", "bright"],
+    allWords: ["early", "bright", "late", "dark"],
+    category: "daily",
+  },
+  {
+    id: 16,
+    text: "We play _____ games in the _____ park.",
+    correctWords: ["fun", "big"],
+    allWords: ["fun", "big", "boring", "small"],
+    category: "daily",
+  },
+  {
+    id: 17,
+    text: "The _____ teacher helps us _____ new things.",
+    correctWords: ["kind", "learn"],
+    allWords: ["kind", "learn", "mean", "forget"],
+    category: "daily",
+  },
+  {
+    id: 18,
+    text: "My _____ friends make me feel _____.",
+    correctWords: ["best", "happy"],
+    allWords: ["best", "happy", "worst", "sad"],
+    category: "daily",
   },
 ];
 
+// Shuffle array helper function
+function shuffleArray(array) {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
+
+// Get unused sentences, reset if all used
+function getUnusedSentences() {
+  const usedIds = JSON.parse(
+    sessionStorage.getItem(USED_SENTENCES_KEY) || "[]",
+  );
+  const unusedSentences = ALL_SENTENCES.filter((s) => !usedIds.includes(s.id));
+
+  if (unusedSentences.length === 0) {
+    // All sentences used, reset and start fresh
+    sessionStorage.setItem(USED_SENTENCES_KEY, "[]");
+    return shuffleArray([...ALL_SENTENCES]);
+  }
+
+  return shuffleArray(unusedSentences);
+}
+
 const FillInTheGaps = () => {
+  // Get initial sentences from unused pool
+  const initialSentencesRef = useRef(getUnusedSentences().slice(0, 5));
+  const [sentences, setSentences] = useState(initialSentencesRef.current);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [words, setWords] = useState(shuffleArray([...SENTENCES[0].allWords]));
+  const [words, setWords] = useState(shuffleArray([...sentences[0].allWords]));
   const [filledGaps, setFilledGaps] = useState([null, null]);
   const [selectedGap, setSelectedGap] = useState(0);
   const [result, setResult] = useState(null);
   const [score, setScore] = useState(0);
   const [totalAttempts, setTotalAttempts] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const usedSentenceIdsRef = useRef(new Set());
   const toast = useToast();
 
-  const currentSentence = SENTENCES[currentIndex];
+  const currentSentence = sentences[currentIndex];
 
-  function shuffleArray(array) {
-    const newArray = [...array];
-    for (let i = newArray.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  // Mark sentence as used
+  const markSentenceAsUsed = useCallback((sentenceId) => {
+    if (usedSentenceIdsRef.current.has(sentenceId)) return;
+
+    usedSentenceIdsRef.current.add(sentenceId);
+    const storedIds = JSON.parse(
+      sessionStorage.getItem(USED_SENTENCES_KEY) || "[]",
+    );
+    if (!storedIds.includes(sentenceId)) {
+      storedIds.push(sentenceId);
+      sessionStorage.setItem(USED_SENTENCES_KEY, JSON.stringify(storedIds));
     }
-    return newArray;
-  }
+  }, []);
+
+  // Load more sentences when needed
+  const loadMoreSentences = useCallback(() => {
+    const newSentences = getUnusedSentences().slice(0, 5);
+    setSentences(newSentences);
+    setCurrentIndex(0);
+    setWords(shuffleArray([...newSentences[0].allWords]));
+  }, []);
 
   const selectGap = (index) => {
     if (result) return;
@@ -152,9 +305,19 @@ const FillInTheGaps = () => {
   };
 
   const nextSentence = () => {
-    const nextIndex = (currentIndex + 1) % SENTENCES.length;
-    setCurrentIndex(nextIndex);
-    setWords(shuffleArray([...SENTENCES[nextIndex].allWords]));
+    // Mark current sentence as used
+    markSentenceAsUsed(currentSentence.id);
+
+    const nextIndex = currentIndex + 1;
+
+    if (nextIndex >= sentences.length) {
+      // Load more sentences when we've gone through current batch
+      loadMoreSentences();
+    } else {
+      setCurrentIndex(nextIndex);
+      setWords(shuffleArray([...sentences[nextIndex].allWords]));
+    }
+
     setFilledGaps([null, null]);
     setSelectedGap(0);
     setResult(null);
@@ -166,6 +329,9 @@ const FillInTheGaps = () => {
     setSelectedGap(0);
     setResult(null);
   };
+
+  // Get total sentences for display
+  const totalSentencesAvailable = ALL_SENTENCES.length;
 
   const accuracy = useMemo(() => {
     if (totalAttempts === 0) return 0;
@@ -278,7 +444,8 @@ const FillInTheGaps = () => {
                       variant="default"
                       className="bg-white/20 text-white border-0 mb-2"
                     >
-                      Sentence {currentIndex + 1} of {SENTENCES.length}
+                      {currentSentence.category} • {totalAttempts + 1} of{" "}
+                      {totalSentencesAvailable}
                     </Badge>
                     <h1 className="text-2xl font-bold text-white">
                       Fill in the Gaps

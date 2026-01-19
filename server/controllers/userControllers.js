@@ -430,6 +430,10 @@ const extractJSON = (text) => {
  */
 const testApi = asyncHandler(async (req, res) => {
   const token = process.env.api_token;
+  const { exclude } = req.query;
+
+  // Parse excluded question IDs/texts
+  const excludedQuestions = exclude ? exclude.split(",").filter(Boolean) : [];
 
   if (!token) {
     throw ErrorTypes.Internal("AI service not configured");
@@ -440,30 +444,62 @@ const testApi = asyncHandler(async (req, res) => {
     apiKey: token,
   });
 
+  // Create a unique context based on excluded questions to get different results
+  const uniqueContext =
+    excludedQuestions.length > 0
+      ? `Avoid these topics/questions: ${excludedQuestions.slice(-10).join(", ")}. `
+      : "";
+
+  // Randomize the topic category
+  const topics = [
+    "science and nature",
+    "world history",
+    "mathematics and logic",
+    "geography and culture",
+    "literature and arts",
+    "technology and innovation",
+    "sports and games",
+    "music and entertainment",
+    "animals and biology",
+    "space and astronomy",
+    "food and cuisine",
+    "languages and linguistics",
+  ];
+  const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+
   const response = await client.chat.completions.create({
     messages: [
       {
         role: "system",
         content: `You are a language teacher creating quizzes for students. 
-        Create 1 question in Spanish with its translation hint.
+        ${uniqueContext}
+        Create 1 unique question about ${randomTopic} in Spanish with its translation hint.
+        Make sure the question is different from any previously asked.
         Return ONLY valid JSON in this exact format:
-        [{"text": "¿Question in Spanish?", "hint": "English hint", "options": [{"id": "1", "text": "Option 1", "isCorrect": false}, {"id": "2", "text": "Option 2", "isCorrect": true}, {"id": "3", "text": "Option 3", "isCorrect": false}, {"id": "4", "text": "Option 4", "isCorrect": false}]}]
-        Make sure exactly one option has isCorrect: true.`,
+        {"id": "${Date.now()}", "text": "¿Question in Spanish?", "hint": "English hint", "options": [{"id": 1, "text": "Option 1", "isCorrect": false}, {"id": 2, "text": "Option 2", "isCorrect": true}, {"id": 3, "text": "Option 3", "isCorrect": false}, {"id": 4, "text": "Option 4", "isCorrect": false}]}
+        Make sure exactly one option has isCorrect: true.
+        Include a unique "id" field with a timestamp.`,
       },
     ],
     model: "gpt-4o",
-    temperature: 0.7,
+    temperature: 0.9, // Higher temperature for more variety
     max_tokens: 500,
   });
 
   const chatResponse = response.choices[0].message.content;
   const chatJson = extractJSON(chatResponse);
 
-  if (!chatJson || !chatJson[0]) {
+  if (!chatJson) {
     throw ErrorTypes.Internal("Failed to generate question");
   }
 
-  res.status(200).json(chatJson[0]);
+  // Ensure the response has an ID
+  const result = Array.isArray(chatJson) ? chatJson[0] : chatJson;
+  if (!result.id) {
+    result.id = `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  res.status(200).json(result);
 });
 
 /**
@@ -473,6 +509,10 @@ const testApi = asyncHandler(async (req, res) => {
  */
 const listenApi = asyncHandler(async (req, res) => {
   const token = process.env.api_token;
+  const { exclude } = req.query;
+
+  // Parse excluded phrases
+  const excludedPhrases = exclude ? exclude.split("|").filter(Boolean) : [];
 
   if (!token) {
     throw ErrorTypes.Internal("AI service not configured");
@@ -483,16 +523,40 @@ const listenApi = asyncHandler(async (req, res) => {
     apiKey: token,
   });
 
+  // Create context to avoid repeats
+  const avoidContext =
+    excludedPhrases.length > 0
+      ? `Do NOT use these phrases or similar ones: ${excludedPhrases.slice(-10).join("; ")}. `
+      : "";
+
+  // Randomize the type of sentence
+  const sentenceTypes = [
+    "a motivational quote",
+    "a fun fact",
+    "a greeting or introduction",
+    "a question about hobbies",
+    "a statement about learning",
+    "a description of nature",
+    "a sentence about food",
+    "a travel-related phrase",
+    "a compliment or encouragement",
+    "a daily routine statement",
+  ];
+  const randomType =
+    sentenceTypes[Math.floor(Math.random() * sentenceTypes.length)];
+
   const response = await client.chat.completions.create({
     messages: [
       {
         role: "system",
-        content: `You are a language teacher. Generate a short, clear English sentence (maximum 8 words) for speech practice.
-        Return ONLY the sentence, no quotes, no explanation, just the plain sentence.`,
+        content: `You are a language teacher. Generate ${randomType} as a short, clear English sentence (maximum 8 words) for speech practice.
+        ${avoidContext}
+        Return ONLY the sentence, no quotes, no explanation, just the plain sentence.
+        Make it unique and different from common phrases.`,
       },
     ],
     model: "gpt-4o",
-    temperature: 0.7,
+    temperature: 0.95, // High temperature for variety
     max_tokens: 50,
   });
 
@@ -501,8 +565,8 @@ const listenApi = asyncHandler(async (req, res) => {
     .replace(/['"]/g, "");
 
   res.status(200).json({
-    sentence,
-    wordCount: sentence.split(" ").length,
+    text: sentence,
+    id: `s_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
   });
 });
 

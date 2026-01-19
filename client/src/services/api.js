@@ -146,8 +146,17 @@ export const userAPI = {
 
 // ==================== QUIZ API ====================
 export const quizAPI = {
-  getRandomQuestion: () => api.get("/user/getAiQuizz", { timeout: 30000 }), // AI needs longer timeout
-  getSpeechChallenge: () => api.get("/user/sound", { timeout: 30000 }),
+  // Pass excludeIds to get different questions each time
+  getRandomQuestion: (excludeIds = []) =>
+    api.get("/user/getAiQuizz", {
+      timeout: 30000,
+      params: { exclude: excludeIds.join(",") },
+    }),
+  getSpeechChallenge: (excludePhrases = []) =>
+    api.get("/user/sound", {
+      timeout: 30000,
+      params: { exclude: excludePhrases.slice(0, 10).join("|") },
+    }),
   submitAnswer: (data) => api.post("/user/submit", data),
 };
 

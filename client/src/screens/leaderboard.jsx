@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import Header from "../components/header";
 import Footer from "../components/footer";
@@ -6,6 +6,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import { userAPI, getErrorMessage } from "../services/api";
+import axios from "axios";
 
 const Leaderboard = () => {
   const { user } = useAuth();
@@ -13,43 +14,59 @@ const Leaderboard = () => {
   const [loading, setLoading] = useState(true);
   const [leaderboard, setLeaderboard] = useState([]);
   const [userRank, setUserRank] = useState(null);
+  const hasFetchedRef = useRef(false);
+  const isFetchingRef = useRef(false);
 
-  useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        setLoading(true);
-        const { data } = await userAPI.getAllUsers();
+  const fetchLeaderboard = useCallback(async () => {
+    // Prevent duplicate requests
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
-        if (data?.users) {
-          // Sort by score and add ranks
-          const sorted = data.users
-            .sort((a, b) => b.score - a.score)
-            .map((u, index) => ({
-              ...u,
-              rank: index + 1,
-            }));
+    try {
+      setLoading(true);
+      const { data } = await userAPI.getAllUsers();
 
-          setLeaderboard(sorted);
+      if (data?.users) {
+        // Sort by score and add ranks
+        const sorted = data.users
+          .sort((a, b) => b.score - a.score)
+          .map((u, index) => ({
+            ...u,
+            rank: index + 1,
+          }));
 
-          // Find current user's rank
-          if (user) {
-            const currentUserRank = sorted.findIndex(
-              (u) => u.name === user.name,
-            );
-            if (currentUserRank !== -1) {
-              setUserRank(currentUserRank + 1);
-            }
+        setLeaderboard(sorted);
+        hasFetchedRef.current = true;
+
+        // Find current user's rank
+        if (user) {
+          const currentUserRank = sorted.findIndex((u) => u.name === user.name);
+          if (currentUserRank !== -1) {
+            setUserRank(currentUserRank + 1);
           }
         }
-      } catch (error) {
-        toast.error(getErrorMessage(error));
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (error) {
+      // Ignore cancelled requests
+      if (
+        axios.isCancel(error) ||
+        error.message === "Duplicate request cancelled"
+      ) {
+        return;
+      }
+      toast.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+      isFetchingRef.current = false;
+    }
+  }, [user]); // Remove toast from dependencies
 
-    fetchLeaderboard();
-  }, [user, toast]);
+  useEffect(() => {
+    // Only fetch once on mount
+    if (!hasFetchedRef.current) {
+      fetchLeaderboard();
+    }
+  }, [fetchLeaderboard]);
 
   const getRankStyle = (rank) => {
     switch (rank) {

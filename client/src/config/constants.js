@@ -117,43 +117,43 @@ export const VALIDATION = {
 };
 
 // Badge Definitions
-export const BADGES = {
-  FIRST_ANSWER: {
+export const BADGES = [
+  {
     id: "first_answer",
     name: "First Step",
     description: "Answer your first question",
     icon: "🎯",
     requirement: 1,
   },
-  PERFECT_STREAK: {
+  {
     id: "perfect_streak",
     name: "Perfect!",
     description: "Get 10 correct answers in a row",
     icon: "⭐",
     requirement: 10,
   },
-  CENTURY: {
-    id: "century",
-    name: "Century",
-    description: "Reach 100 points",
-    icon: "💯",
-    requirement: 100,
-  },
-  DEDICATED: {
+  {
     id: "dedicated",
     name: "Dedicated Learner",
     description: "Answer 50 questions",
     icon: "📚",
     requirement: 50,
   },
-  MASTER: {
+  {
+    id: "century",
+    name: "Century",
+    description: "Reach 100 points",
+    icon: "💯",
+    requirement: 100,
+  },
+  {
     id: "master",
     name: "Quiz Master",
     description: "Reach 1000 points",
     icon: "🏆",
     requirement: 1000,
   },
-};
+];
 
 // Game Cards for Challenges
 export const GAME_CARDS = [

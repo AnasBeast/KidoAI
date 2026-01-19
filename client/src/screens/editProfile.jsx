@@ -233,7 +233,7 @@ const EditProfile = () => {
                     type="text"
                     id="name"
                     disabled={submitting}
-                    icon={<User className="w-5 h-5 text-neutral-400" />}
+                    icon={User}
                     error={errors.name?.message}
                   />
                 </motion.div>
@@ -247,7 +247,7 @@ const EditProfile = () => {
                     type="email"
                     value={user?.email || ""}
                     disabled
-                    icon={<Mail className="w-5 h-5 text-neutral-400" />}
+                    icon={Mail}
                     className="bg-neutral-100 cursor-not-allowed"
                   />
                   <p className="mt-1 text-xs text-neutral-500 flex items-center gap-1">
@@ -279,9 +279,7 @@ const EditProfile = () => {
                             id="current-password"
                             placeholder="Enter current password"
                             disabled={submitting}
-                            icon={
-                              <Shield className="w-5 h-5 text-neutral-400" />
-                            }
+                            icon={Shield}
                           />
                         </div>
 
@@ -298,7 +296,7 @@ const EditProfile = () => {
                             id="new-password"
                             placeholder="Enter new password"
                             disabled={submitting}
-                            icon={<Lock className="w-5 h-5 text-neutral-400" />}
+                            icon={Lock}
                           />
                           <p className="mt-1 text-xs text-neutral-500">
                             Must be at least 8 characters

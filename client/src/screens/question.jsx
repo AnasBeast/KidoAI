@@ -88,32 +88,73 @@ const QNA = () => {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
       const recognitionInstance = new SpeechRecognition();
-      recognitionInstance.continuous = false;
+      recognitionInstance.continuous = true;
       recognitionInstance.lang = "en-US";
       recognitionInstance.interimResults = true;
+      recognitionInstance.maxAlternatives = 1;
+
+      let finalTranscript = "";
+
+      recognitionInstance.onstart = () => {
+        console.log("Speech recognition started");
+        finalTranscript = "";
+      };
 
       recognitionInstance.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        setUserAnswer(transcript);
+        let interimTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + " ";
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        // Show interim results while speaking, final when done
+        setUserAnswer((finalTranscript + interimTranscript).trim());
       };
 
       recognitionInstance.onerror = (event) => {
         console.error("Speech recognition error:", event.error);
         setIsListening(false);
-        if (event.error === "not-allowed") {
-          toast.error(
-            "Please allow microphone access to use speech recognition",
-          );
-        } else {
-          toast.error("Speech recognition error. Please try again.");
+
+        switch (event.error) {
+          case "not-allowed":
+          case "permission-denied":
+            toast.error(
+              "Please allow microphone access to use speech recognition",
+            );
+            break;
+          case "no-speech":
+            toast.info("No speech detected. Please try again.");
+            break;
+          case "audio-capture":
+            toast.error("No microphone found. Please check your device.");
+            break;
+          case "network":
+            toast.error("Network error. Please check your connection.");
+            break;
+          case "aborted":
+            // User stopped, no error message needed
+            break;
+          default:
+            toast.error("Speech recognition error. Please try again.");
         }
       };
 
-      recognitionInstance.onend = () => setIsListening(false);
+      recognitionInstance.onend = () => {
+        console.log("Speech recognition ended");
+        setIsListening(false);
+      };
+
       setRecognition(recognitionInstance);
     } else {
       setBrowserSupported(false);
-      toast.warning("Speech recognition is not supported in your browser");
+      toast.warning(
+        "Speech recognition is not supported in your browser. Please use Chrome or Edge.",
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -272,11 +313,31 @@ const QNA = () => {
     return matches / Math.max(words1.length, words2.length);
   };
 
-  const startListening = () => {
-    if (recognition) {
+  const startListening = async () => {
+    if (!recognition) {
+      toast.error("Speech recognition not available");
+      return;
+    }
+
+    try {
+      // Request microphone permission first
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+
       setUserAnswer("");
       recognition.start();
       setIsListening(true);
+    } catch (error) {
+      console.error("Microphone permission error:", error);
+      if (
+        error.name === "NotAllowedError" ||
+        error.name === "PermissionDeniedError"
+      ) {
+        toast.error("Please allow microphone access to use speech recognition");
+      } else if (error.name === "NotFoundError") {
+        toast.error("No microphone found. Please connect a microphone.");
+      } else {
+        toast.error("Could not access microphone. Please check your settings.");
+      }
     }
   };
 

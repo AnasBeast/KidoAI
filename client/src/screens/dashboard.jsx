@@ -56,13 +56,23 @@ const Dashboard = () => {
       else break;
     }
 
-    // Calculate badges earned
-    const badges = [];
-    if (totalAnswers >= 1) badges.push(BADGES.FIRST_ANSWER);
-    if (streak >= 10) badges.push(BADGES.PERFECT_STREAK);
-    if (userData.score >= 100) badges.push(BADGES.CENTURY);
-    if (totalAnswers >= 50) badges.push(BADGES.DEDICATED);
-    if (userData.score >= 1000) badges.push(BADGES.MASTER);
+    // Calculate badges earned based on requirements
+    const badges = BADGES.filter((badge) => {
+      switch (badge.id) {
+        case "first_answer":
+          return totalAnswers >= 1;
+        case "perfect_streak":
+          return streak >= 10;
+        case "dedicated":
+          return totalAnswers >= 50;
+        case "century":
+          return userData.score >= 100;
+        case "master":
+          return userData.score >= 1000;
+        default:
+          return userData.score >= badge.requirement;
+      }
+    });
 
     return {
       score: userData.score || 0,
@@ -340,8 +350,9 @@ const Dashboard = () => {
                     Next badges to unlock:
                   </p>
                   <div className="flex gap-2">
-                    {Object.values(BADGES)
-                      .filter((b) => !earnedBadges.find((eb) => eb.id === b.id))
+                    {BADGES.filter(
+                      (b) => !earnedBadges.find((eb) => eb.id === b.id),
+                    )
                       .slice(0, 3)
                       .map((badge) => (
                         <div
